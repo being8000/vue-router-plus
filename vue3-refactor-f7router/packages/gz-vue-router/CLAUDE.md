@@ -24,7 +24,12 @@ createGZRouter() ---持有响应式状态---> stack / modalStack / direction / c
                   ---导航方法-------> push / replace / back / go / forward
                   ---守卫管线-------> beforeEach / afterEach
                                      / beforeEnter（沿 chain 级联收集，见下）
-                                     / onBeforeRouteLeave / onBeforeRouteUpdate（每个 entry 一份，不分链上层级）
+                                     / onBeforeRouteLeave / onBeforeRouteUpdate / onBeforeRouteEnter
+                                       （每个 entry 一份，不分链上层级；onBeforeRouteEnter 只在
+                                        “组件实例本来没被销毁、现在重新变回当前层”时触发，见下）
+                  ---只读通知-------> onRouteActivated（entry 变成 is-current/弹层栈顶时触发，
+                                       覆盖首屏/刷新/push/replace 新建 + onBeforeRouteEnter 覆盖
+                                       的重新激活，不是守卫、不能取消导航，见下）
                   ---浏览器同步-----> history.ts 的 seq 分配器 + popstate 监听
                                         |
                                  <GZRouterView> 根用法：消费 stack/direction 渲染页面过渡动画，
@@ -95,6 +100,18 @@ createGZRouter() ---持有响应式状态---> stack / modalStack / direction / c
     - 未嵌套路由 `chain[0] === route`，行为和之前完全一样，不是破坏性变更。嵌套路由场景下，这个改动是"父路由设置整体布局"这个需求能落地的关键：只要新旧导航共享同一个链根（同一个布局），就复用同一个 `entry.id`（布局组件实例不重建，只有 `onBeforeRouteUpdate` 感知到变化），链上更深的部分交给嵌套 `<GZRouterView>` 通过响应式的 `CHAIN_KEY` 自然重新渲染。`push()` 故意没有做同样的处理——`push()` 语义上就是"新开一页"，应该总是完整重新挂载（包括布局），想要"同一布局下切换子路由不重新挂载"的效果要用 `replace()`。
     - 代价（已知限制，写进了 README）：`onBeforeRouteLeave`/`onBeforeRouteUpdate` 是按 entry（不是按链上层级）登记的，链根相同触发的是"整个 entry 的 update 守卫"，叶子组件自己注册的 `onBeforeRouteLeave` 不会被触发——叶子如果要在"被同级路由替换掉"时做确认，应该注册 `onBeforeRouteUpdate` 而不是 `onBeforeRouteLeave`。
 
+14. **`onBeforeRouteEnter` 判断"这个 entry 是不是本来就还活着"，页面栈和弹层栈的算法不一样，不要写反。**
+    - 背景：`<GZRouterView>` 只同时挂载 `stack` 最后两条（`is-current` + `is-previous`），`<GZModalView>` 则整体渲染 `modalStack`（弹层从打开到关闭全程挂载）——两者对"这个 entry 有没有被销毁过"的判断依据完全不同。
+    - 页面栈：只有目标 entry **在这次操作之前**恰好处于 `stack.length - 2` 这个位置（也就是当前的 `is-previous`）时，才算"本来就还活着"，要跑它的 enter 守卫；如果物理返回一次跳了不止一级，中间/更早的位置本来就没在可视窗口里、早就被销毁过，重新进入是货真价实的新建，不该跑 enter 守卫（跑了也没意义，因为组件是全新实例，`onMounted` 已经覆盖了这个场景）。判断代码：`pageIndex === stack.length - 2`（用操作之前的 `stack.length`）。
+    - 弹层栈：只要 `modalStack` 里还存在"下面一层"（`below`/`modalStack[modalIndex]`），它就必然是一直挂载着的，无条件跑它的 enter 守卫，不需要位置判断。
+    - 这套判断分散在四个地方（`back()` 的页面分支和弹层分支、`popstate` 的 `modalIndex` 分支和 `pageIndex` 分支），改任何一处物理返回/应用内返回的逻辑时，如果动了出栈/截断的位置计算，要连带检查这四处的"是否已挂载"判断是否还成立。
+
+15. **`onRouteActivated` 不能只靠 `onMounted` 判断"变成当前层"，也不能只靠 router 内部的登记表判断——必须两路信号合并，且各自都要做"是否真的是栈顶"的校验。**
+    - 背景：这个钩子要覆盖 `onBeforeRouteEnter` 之外的场景（首屏加载、刷新、`push`/`replace` 新建），这些场景组件是**全新挂载**的，router 内部任何"mutate 之后同步查表通知"的机制都够不到——新组件的 `setup()`/`onMounted` 还没跑（Vue 的渲染是异步的，`withGuards` 里 `mutate()` 之后紧跟着的同步代码执行时，新组件实例根本还不存在），所以这部分只能靠组件自己的 `onMounted` 探测。
+    - 但 `onMounted` 不能当作"我就是当前层"的充分条件：多级 `popstate` 回退时，一个早就被真正销毁过的 entry 可能会被顺带带回可视窗口，但落地位置是 `is-previous`（真正的 `is-current` 是回退目标本身）——这时 `onMounted` 会触发，但这个 entry 并不是"正在展示给用户"的那一层。必须在 `onMounted` 里额外校验 `entryId` 是否真的等于 `router.stack`/`router.modalStack` 当前的栈顶 id，不是就跳过。
+    - 反过来，"重新激活"（组件本来就没销毁，只是从 `is-previous` 被顶回 `is-current`）不会重新触发 `onMounted`，这部分靠 `router.ts` 里单独一张 `activatedCallbacksMap`（不是复用 `enterGuardsMap`——`onBeforeRouteEnter` 是可取消的导航守卫，混进同一张表会让"纯通知"钩子意外获得取消导航的副作用），在 `withGuards` 的 `mutate()` 之后统一对比 mutate 前后的 `top`/`topModal` id 是否变化来触发，一个地方就能覆盖 `push`/`replace`/`back`/`popstate` 所有分支，不需要像 `onBeforeRouteEnter` 那样在四个分支分别判断"是否已经预挂载"。
+    - 两路信号天然互斥：已经存活的实例走登记表这一路（`onMounted` 不会重跑），全新创建的实例走 `onMounted`+校验这一路（登记表在这个 entryId 上还没有任何注册，查表是空操作），不会重复触发。
+
 ## Bug 修复日志
 
 每一处 bug 修复都在 [`bugs/`](./bugs/) 目录下单独建档（现象/根因/修复/验证），不在这份文件里堆叙述。按修复时间顺序：
@@ -122,6 +139,8 @@ createGZRouter() ---持有响应式状态---> stack / modalStack / direction / c
   4. 直接访问 / 刷新停在 / 物理前进后退落到弹层 URL：背景页是否挂载、弹层是否正常显示
   5. 弹层关闭：有真实历史 vs 没有真实历史两种分支是否都对
   6. 守卫：`beforeEnter` 拦截+重定向、`onBeforeRouteLeave` 取消/放行、`onBeforeRouteUpdate` 触发但不重新挂载组件
+  11. **`onBeforeRouteEnter`**：前进一层（组件保留在背景里）后应用内/物理返回——只触发 `onBeforeRouteEnter`，不触发 `onMounted`，组件实例标记不变；前进两层以上（组件已经真的被挤出去销毁过）后再返回——触发的是 `onMounted` 不是 `onBeforeRouteEnter`；连续两次返回时如果第一次返回让某个 entry 从"销毁状态"变成"挂载状态"，紧接着的第二次返回如果命中它，应该正确判定为"已挂载"（多步物理返回场景，容易漏测）
+  12. **`onRouteActivated`**：首屏加载、以及 `push`/`replace` 新建 entry 都要触发；标准的"回退一层、组件保留在背景里"场景要触发（和 `onBeforeRouteEnter` 同时触发，不重复不遗漏）；**关键边界场景**——深入 2 级以上后物理返回，某个早被销毁的 entry 被顺带带回可视窗口但只是排在 `is-previous` 位置（`onMounted` 会触发），此时**不应该**触发 `onRouteActivated`；紧接着再返回一步，这个 entry 变成真正的 `is-current`（这次是重新激活，不重新 `onMounted`），才应该触发
   7. 守卫重定向回"当前就在的页面"时，确认没有多余的 stack 节点、没有多播一次过渡动画——用 `MutationObserver` 盯 class 变化比截图肉眼看更可靠
   8. **弹层栈叠加**：`push` 打开二级弹层要保留一级弹层挂载，`replace` 要销毁一级弹层；关闭/物理返回/物理前进要能正确地一层一层增减，且不能相互吞掉对方（0005）
   9. **弹层内容里的 `onBeforeRouteLeave`/`onBeforeRouteUpdate`** 要能正常触发（弹层组件也走 `EntryProvider`）
@@ -131,7 +150,7 @@ createGZRouter() ---持有响应式状态---> stack / modalStack / direction / c
 
 - 没有 `<RouterLink>`。
 - 没有多视图/master-detail 布局（F7 那套复杂度目前没有移植过来）。
-- `onBeforeRouteLeave`/`onBeforeRouteUpdate` 是按 entry 登记的，不区分嵌套路由链上的具体层级（见设计决策 13）。
+- `onBeforeRouteLeave`/`onBeforeRouteUpdate`/`onBeforeRouteEnter` 是按 entry 登记的，不区分嵌套路由链上的具体层级（见设计决策 13）。
 - 守卫阻止物理前进/后退时会有一瞬间的地址栏闪烁（`history.go()` 撤销导致），暂未做更精细的处理。
 - 弹层没有 Esc 键关闭（只支持点遮罩关闭 + `router.back()`）。
 

@@ -104,7 +104,7 @@ import { GZRouterView, GZModalView } from 'gz-vue-router';
 
 ```vue
 <script setup lang="ts">
-import { useRouter, useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'gz-vue-router';
+import { useRouter, useRoute, onBeforeRouteLeave, onBeforeRouteUpdate, onBeforeRouteEnter, onRouteActivated } from 'gz-vue-router';
 
 const router = useRouter();
 const route = useRoute(); // 响应式对象，直接 route.params.id 访问，无需 .value
@@ -121,6 +121,18 @@ onBeforeRouteLeave(() => {
 // 同一个组件被复用、只是路由参数变化时触发（对应 router.replace() 命中同组件的场景）
 onBeforeRouteUpdate((to) => {
   console.info('params changed to', to.params);
+});
+
+// 这个组件实例本来没被销毁（一直挂在背景里），现在重新变回当前页/当前弹层时触发——
+// 纯粹第一次挂载不会触发这个（onMounted 已经够用），见下文说明
+onBeforeRouteEnter((to) => {
+  console.info('re-entering as', to.fullPath);
+});
+
+// 只要这个页面/弹层变成"当前正在展示的那一层"就会触发——首屏加载、刷新、
+// push/replace 新建、onBeforeRouteEnter 覆盖的重新激活，四种场景统一触发这一个钩子
+onRouteActivated((to) => {
+  console.info('now displayed as', to.fullPath);
 });
 </script>
 ```
@@ -167,13 +179,45 @@ onBeforeRouteUpdate((to) => {
 - `false`：取消本次导航
 - 字符串或 `{name, params, query}`：重定向
 
-优先级（同一次导航里的执行顺序）：**离开守卫（onBeforeRouteLeave/onBeforeRouteUpdate）→ 全局 `beforeEach` → 目标路由的 `beforeEnter`**，全部通过才会真正修改页面栈/弹层栈/历史记录，然后触发全局 `afterEach`。
+优先级（同一次导航里的执行顺序）：**离开守卫（onBeforeRouteLeave/onBeforeRouteUpdate）→ 全局 `beforeEach` → 目标路由的 `beforeEnter` → 进入守卫（onBeforeRouteEnter）**，全部通过才会真正修改页面栈/弹层栈/历史记录，然后触发全局 `afterEach`。
 
 重定向目标如果就是用户当前已经停留的页面，不会产生任何导航效果（不入栈、不播放过渡动画）——只有重定向到一个**不同**的页面时才会像一次正常的 `push` 一样播放过渡动画。
 
-### `onBeforeRouteLeave` / `onBeforeRouteUpdate`
+### `onBeforeRouteLeave` / `onBeforeRouteUpdate` / `onBeforeRouteEnter`
 
 必须在页面组件的 `setup()` 内调用。**页面级路由（`<GZRouterView>`）和弹层路由（`<GZModalView>`）里的组件都支持**，两者都会给渲染出来的组件套一层 `EntryProvider` 提供必要的上下文。
+
+`onBeforeRouteEnter` 是 gz-vue-router 特有的钩子，**vue-router 没有对应概念**，也**不是**vue-router 里同名的 `beforeRouteEnter`（那个是在组件实例还不存在时触发、靠 `next(vm => {})` 拿实例，且每次进入这条路由——包括第一次——都会触发）。
+
+这个钩子存在的原因：`<GZRouterView>` 为了做滑动过渡动画，会同时挂载"当前页"和"上一页"两层（`<GZModalView>` 更彻底，弹层栈里每一层从打开到关闭全程都挂载着）。页面/弹层离开当前焦点时触发的是 `onBeforeRouteLeave`，但组件实例往往**没有被销毁**，只是退到了背景里——这种情况下用户再返回这个页面，因为实例本来就还活着，Vue 不会重新触发 `onMounted`。`onBeforeRouteEnter` 就是用来补上这个空档的：
+
+- 只在"这个组件实例本来就没被销毁，现在要重新变回当前页/当前弹层"时触发。
+- 纯粹的第一次挂载（第一次导航进入这条路由）**不会**触发它——那种场景 `onMounted` 已经够用。
+- 语义上更接近 `<KeepAlive>` 的 `onActivated`（组件"重新激活"），只是复用了导航守卫的调用方式（`(to, from) => 返回值`，可以返回 `false`/重定向取消这次导航），和 `onBeforeRouteLeave`/`onBeforeRouteUpdate` 保持一致的 API 形状。
+
+具体什么时候算"本来就没被销毁"：`<GZRouterView>` 只同时挂载页面栈最后两条（当前页 + 上一页），所以只有物理返回/应用内返回**恰好回退一层**、揭示出的正是那"上一页"时，才会触发 `onBeforeRouteEnter`；如果之前导航得更深、这个页面早就被挤出这两层窗口、真的卸载过了，再次进入就是普通的重新创建（`onMounted`），不会触发 `onBeforeRouteEnter`。`<GZModalView>` 因为弹层栈是整体渲染、从不做"只保留最后两层"的裁剪，所以只要栈里还有下面一层弹层，回退到它就**总是**触发 `onBeforeRouteEnter`。
+
+### `onRouteActivated`
+
+也是 gz-vue-router 特有的钩子，和 `onBeforeRouteEnter` 的关系：**`onBeforeRouteEnter` 只覆盖"重新激活"这一种场景，`onRouteActivated` 覆盖"变成当前展示层"的所有场景**——首屏加载、刷新、`push`/`replace` 新建、以及 `onBeforeRouteEnter` 那种重新激活，统一触发这一个钩子。
+
+```ts
+onRouteActivated((to) => {
+  console.info('now displayed as', to.fullPath);
+});
+```
+
+- 不是导航守卫，**没有取消导航的能力**，回调的返回值会被忽略——它是"已经确定会展示"之后的只读通知，签名固定是 `(to) => void`。
+- 判断依据是"是否真的是 `stack`/`modalStack` 的栈顶"，不是单纯的组件挂载：物理返回如果一次跳了不止一级，中间被顺带带回可视窗口、但只是排在"上一页"位置的页面，即使这次是全新创建（重新触发了 `onMounted`），也**不会**触发 `onRouteActivated`——它此刻并不是真正展示给用户看的那一层。
+
+### 什么时候用哪个钩子
+
+| 需求 | 用哪个 |
+|---|---|
+| 离开当前页/弹层时确认（可以取消导航） | `onBeforeRouteLeave` |
+| 同一组件复用、参数变化 | `onBeforeRouteUpdate` |
+| 只关心"重新激活"这一种场景，且需要拦截能力 | `onBeforeRouteEnter` |
+| 只要变成当前展示层就要感知（含首屏/刷新），且只是要做只读副作用（比如埋点、刷新数据） | `onRouteActivated` |
 
 ## 弹层栈（`meta.modal`）
 
@@ -229,7 +273,9 @@ import { GZRouterView } from 'gz-vue-router';
 
 - 物理前进/后退如果被守卫拦截，会调用 `history.go()` 撤销已经发生的浏览器导航，中间会有一瞬间的地址栏闪烁——这是 History API 的固有限制（vue-router 自己也是这样处理的）。
 - 只支持单一页面栈 + 单一弹层栈，没有 F7 的多视图/master-detail 布局。
-- `onBeforeRouteLeave`/`onBeforeRouteUpdate` 的粒度是"每个页面栈/弹层栈 entry 一份"，不是"每一层嵌套路由记录一份"——嵌套场景下，布局和它的子路由如果都注册了守卫，会共享同一份登记（都在同一个 entry 上）。用 `replace()` 在共享布局的兄弟子路由间切换时，这次导航按"更新"处理，只会触发 `onBeforeRouteUpdate`，子路由自己注册的 `onBeforeRouteLeave` 不会触发——子路由如果需要在这种"被同级路由替换掉"的场景下做确认，应该用 `onBeforeRouteUpdate` 而不是 `onBeforeRouteLeave`。
+- `onBeforeRouteLeave`/`onBeforeRouteUpdate`/`onBeforeRouteEnter` 的粒度是"每个页面栈/弹层栈 entry 一份"，不是"每一层嵌套路由记录一份"——嵌套场景下，布局和它的子路由如果都注册了守卫，会共享同一份登记（都在同一个 entry 上）。用 `replace()` 在共享布局的兄弟子路由间切换时，这次导航按"更新"处理，只会触发 `onBeforeRouteUpdate`，子路由自己注册的 `onBeforeRouteLeave` 不会触发——子路由如果需要在这种"被同级路由替换掉"的场景下做确认，应该用 `onBeforeRouteUpdate` 而不是 `onBeforeRouteLeave`。
+- `onBeforeRouteEnter` 虽然复用了导航守卫的调用方式（能返回 `false`/重定向），但语义上更接近生命周期钩子——如果不需要拦截能力，注册时直接忽略返回值就行（不写 `return`），不会有副作用。
+- `onRouteActivated` 和 `onBeforeRouteEnter`/`onBeforeRouteLeave`/`onBeforeRouteUpdate` 一样，粒度是"每个 entry 一份"，不区分嵌套路由链上的具体层级。
 - 没有 `<RouterLink>` 之类的组件，业务方自己用按钮/`<a>` 调用 `router.push`。
 - 首屏落地不会触发 `beforeEach`/`beforeEnter`（避免被拦截后卡在空白页、没有兜底），只会触发 `afterEach` 这类只读副作用。
 - **不会**、也**不应该**设置 `app.config.globalProperties.$router`/`$route`：Vuetify 的 `<v-dialog>`/`<v-menu>` 等组件（基于 `VOverlay`）会自动探测 `$router` 是否存在，探测到就注册自己的一套"物理返回关闭浮层"逻辑，和这个包自己的 `popstate` 处理会互相打架、导致死循环。这也是弹层渲染改成自己实现而不是包一层 `<v-dialog>` 的直接原因，详见 [`CLAUDE.md`](./CLAUDE.md) 和 [`bugs/0003`](./bugs/0003-vdialog-closeonback-conflict.md)。
@@ -247,7 +293,7 @@ src/
 ├── router.ts                 createGZRouter() 核心实现（页面栈 + 弹层栈 + 守卫管线 + 浏览器同步）
 ├── injection.ts              useRouter() / useRoute()
 ├── injection-keys.ts         provide/inject 用的 Symbol key（含嵌套路由用的 CHAIN_KEY/DEPTH_KEY）
-├── composables.ts            onBeforeRouteLeave / onBeforeRouteUpdate
+├── composables.ts            onBeforeRouteLeave / onBeforeRouteUpdate / onBeforeRouteEnter / onRouteActivated
 ├── components/
 │   ├── GZRouterView.vue      渲染页面栈 + 过渡动画；同一个组件也用作嵌套路由的内层视图
 │   ├── GZModalView.vue       渲染弹层栈（自己实现遮罩+卡片，不依赖 v-dialog）

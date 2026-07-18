@@ -1,17 +1,15 @@
 <script setup lang="ts">
-import { onBeforeRouteLeave, useRoute, useRouter } from 'gz-vue-router';
+import { onBeforeRouteLeave, onBeforeRouteEnter, onRouteActivated, useRoute, useRouter } from 'gz-vue-router';
+import { onMounted, onUnmounted } from 'vue';
 
 const router = useRouter();
-const route = useRoute()
+const route = useRoute();
 const items = [
   { id: '1', title: '订单 #1001', subtitle: '已发货' },
   { id: '2', title: '订单 #1002', subtitle: '待付款' },
   { id: '3', title: '订单 #1003', subtitle: '已完成' },
 ];
-onBeforeRouteLeave(() => {
-  console.log(route, 'onBeforeRouteLeave')
-  return true
-})
+
 function openDetail(id: string) {
   router.push({ name: 'detail', params: { id } });
 }
@@ -25,6 +23,32 @@ function openSettings() {
 function openDashboard() {
   router.push({ name: 'dashboard-overview' });
 }
+
+onMounted(() => {
+  console.log('home mounted')
+})
+
+onUnmounted(() => {
+  console.log('home unMounted')
+})
+
+onBeforeRouteLeave(() => {
+  console.log( 'home onBeforeRouteLeave')
+  return true
+})
+
+// 首页从"当前页"变成背景里的"上一页"时不会 unmounted（这就是上面 onUnmounted 不会在
+// 普通前进导航时打印的原因）；等用户再返回首页时，这个还活着的实例不会重新触发 onMounted，
+// onBeforeRouteEnter 专门补上这个"重新变回当前页"的时机
+onBeforeRouteEnter((to) => {
+  console.log('home onBeforeRouteEnter: leaving', route.fullPath, '-> re-entering home as', to.fullPath)
+  return true
+})
+
+// 覆盖首屏加载/刷新 + onBeforeRouteEnter 之外的"重新变回当前页"，统一在一个钩子里通知
+onRouteActivated((to) => {
+  console.log('home onRouteActivated:', to.fullPath)
+})
 </script>
 
 <template>

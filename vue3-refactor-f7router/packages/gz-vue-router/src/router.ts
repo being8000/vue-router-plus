@@ -44,11 +44,16 @@ export interface GZRouter {
   direction: { value: Direction };
   canGoBack: { value: boolean };
 
-  /** @internal 供 onBeforeRouteLeave/onBeforeRouteUpdate 使用 */
+  /** @internal 供 onBeforeRouteLeave/onBeforeRouteUpdate/onBeforeRouteEnter 使用 */
   _registerLeaveGuard(entryId: number, guard: NavigationGuard): void;
   _unregisterLeaveGuard(entryId: number, guard: NavigationGuard): void;
   _registerUpdateGuard(entryId: number, guard: NavigationGuard): void;
   _unregisterUpdateGuard(entryId: number, guard: NavigationGuard): void;
+  _registerEnterGuard(entryId: number, guard: NavigationGuard): void;
+  _unregisterEnterGuard(entryId: number, guard: NavigationGuard): void;
+  /** @internal 供 onRouteActivated 使用 */
+  _registerActivatedCallback(entryId: number, callback: (to: RouteLocationNormalized) => void): void;
+  _unregisterActivatedCallback(entryId: number, callback: (to: RouteLocationNormalized) => void): void;
 }
 
 function toLocation(matched: MatchedRoute): RouteLocationNormalized {
@@ -112,6 +117,29 @@ export function createGZRouter(options: GZRouterOptions): GZRouter {
   const afterEachHooks: AfterHook[] = [];
   const leaveGuardsMap = new Map<number, Set<NavigationGuard>>();
   const updateGuardsMap = new Map<number, Set<NavigationGuard>>();
+  // entry 从“背景里还活着但不是当前页”重新变回“当前页”时触发——不是组件第一次挂载
+  // （那种情况 onMounted 已经够用），是组件实例本来就没被销毁、只是被踢出了可视窗口/
+  // 弹层栈没被销毁过，现在又要重新显示出来。见 onBeforeRouteEnter 的调用点。
+  const enterGuardsMap = new Map<number, Set<NavigationGuard>>();
+  // entry 变成 is-current/弹层栈顶那一刻触发，覆盖 onBeforeRouteEnter 之外的两种场景：
+  // 首屏落地、以及 push/replace 新建的 entry 首次挂载就是当前层。不是守卫（不能取消导航），
+  // 纯粹是“已经确定会展示”之后的只读通知，所以在 mutate() 成功之后才触发，而不是掺进
+  // 守卫链里跑。见 onRouteActivated 的调用点。
+  const activatedCallbacksMap = new Map<number, Set<(to: RouteLocationNormalized) => void>>();
+
+  // mutate 前后对比栈顶 id：只有变了才说明“新的当前层”产生了。这一路只能覆盖“entry 组件
+  // 实例本来就没被销毁、这次是重新被顶到当前层”的场景——全新创建的 entry 在这一刻组件还没
+  // 挂载（Vue 的渲染是异步的），查表必然是空的；那种场景由 onRouteActivated 内部的
+  // onMounted 分支自己兜底，两路信号天然互斥，不会重复触发。
+  function notifyActivated(newTop: StackEntry | undefined, prevId: number | undefined) {
+    if (newTop && newTop.id !== prevId) {
+      const callbacks = activatedCallbacksMap.get(newTop.id);
+      if (callbacks) {
+        const location = toLocation(newTop.matched);
+        Array.from(callbacks).forEach((cb) => cb(location));
+      }
+    }
+  }
 
   function makeEntry(matched: MatchedRoute, seq: number, reuseId?: number): StackEntry {
     const id = reuseId ?? (uid += 1);
@@ -183,8 +211,12 @@ export function createGZRouter(options: GZRouterOptions): GZRouter {
       }
       return false;
     }
+    const prevTopId = top.value?.id;
+    const prevTopModalId = topModal.value?.id;
     mutate();
     Object.assign(currentRoute, to);
+    notifyActivated(top.value, prevTopId);
+    notifyActivated(topModal.value, prevTopModalId);
     afterEachHooks.forEach((hook) => hook(to, from));
     return true;
   }
@@ -290,7 +322,13 @@ export function createGZRouter(options: GZRouterOptions): GZRouter {
       const leaving = topModal.value!;
       const below = modalStack[modalStack.length - 2];
       const to = below ? toLocation(below.matched) : top.value ? toLocation(top.value.matched) : UNKNOWN_LOCATION;
-      const guards = [...Array.from(leaveGuardsMap.get(leaving.id) ?? []), ...beforeEachGuards];
+      // <GZModalView> 渲染的是整个 modalStack（不像页面栈只截取最后两条），below 只要存在
+      // 就必然还挂载着，从没被销毁过——回退到它属于“重新变回当前层”，要跑它的 enter 守卫
+      const guards = [
+        ...Array.from(leaveGuardsMap.get(leaving.id) ?? []),
+        ...beforeEachGuards,
+        ...(below ? Array.from(enterGuardsMap.get(below.id) ?? []) : []),
+      ];
       void withGuards(guards, to, () => {
         modalStack.pop();
         currentSeq.value = topModal.value?.seq ?? top.value?.seq ?? currentSeq.value;
@@ -305,8 +343,16 @@ export function createGZRouter(options: GZRouterOptions): GZRouter {
     }
     if (stack.length > 1) {
       const leaving = top.value!;
-      const to = toLocation(stack[stack.length - 2].matched);
-      const guards = [...Array.from(leaveGuardsMap.get(leaving.id) ?? []), ...beforeEachGuards];
+      const entering = stack[stack.length - 2];
+      const to = toLocation(entering.matched);
+      // <GZRouterView> 只挂载 stack 里最后两条（is-current + is-previous），entering 在这次
+      // 出栈之前必然就是那个“is-previous”，一直没被销毁过——回退到它触发的是重新变回当前页，
+      // 不是第一次挂载，所以要跑它登记的 enter 守卫（不是 onMounted 能覆盖的场景）
+      const guards = [
+        ...Array.from(leaveGuardsMap.get(leaving.id) ?? []),
+        ...beforeEachGuards,
+        ...Array.from(enterGuardsMap.get(entering.id) ?? []),
+      ];
       void withGuards(guards, to, () => {
         direction.value = 'backward';
         stack.pop();
@@ -357,9 +403,16 @@ export function createGZRouter(options: GZRouterOptions): GZRouter {
         if (modalIndex < modalStack.length - 1) {
           // 弹层栈内部的前进/后退：页面栈完全不受影响，只截断弹层栈。
           // 命中这个分支必然是“后退”（找到的是数组里更靠前的位置），撤销时要 go(1) 而不是 go(-1)。
-          const to = toLocation(modalStack[modalIndex].matched);
+          const entering = modalStack[modalIndex];
+          const to = toLocation(entering.matched);
           const leaving = topModal.value!;
-          const guards = [...Array.from(leaveGuardsMap.get(leaving.id) ?? []), ...beforeEachGuards];
+          // modalStack 里的条目只要还在数组里就一直挂载着，entering 找到时已经在 modalStack 里，
+          // 必然是重新变回当前层，不是新建——无条件跑它的 enter 守卫
+          const guards = [
+            ...Array.from(leaveGuardsMap.get(leaving.id) ?? []),
+            ...beforeEachGuards,
+            ...Array.from(enterGuardsMap.get(entering.id) ?? []),
+          ];
           void withGuards(guards, to, () => {
             modalStack.splice(modalIndex + 1);
             currentSeq.value = state.seq!;
@@ -375,11 +428,18 @@ export function createGZRouter(options: GZRouterOptions): GZRouter {
         // 回到了某个页面级历史记录：它一定早于当前所有弹层被打开的时间点（seq 更小），
         // 所以现在挂着的弹层都要一并关闭
         if (pageIndex < stack.length - 1 || modalStack.length > 0) {
-          const to = toLocation(stack[pageIndex].matched);
+          const entering = stack[pageIndex];
+          const to = toLocation(entering.matched);
           const leaving = modalStack.length > 0 ? null : top.value!;
+          // <GZRouterView> 只挂载 stack 最后两条：只有物理返回恰好回退一层
+          // （pageIndex 正好是出栈前的“is-previous”那一条）时，entering 才是本来就还活着、
+          // 现在重新变回当前页；一次跳好几级的话，中间那些位置本来就没挂载过，是全新创建，
+          // 不该当成“重新进入”处理
+          const wasAlreadyMounted = pageIndex === stack.length - 2;
           const guards = [
             ...(leaving ? Array.from(leaveGuardsMap.get(leaving.id) ?? []) : []),
             ...beforeEachGuards,
+            ...(wasAlreadyMounted ? Array.from(enterGuardsMap.get(entering.id) ?? []) : []),
           ];
           void withGuards(guards, to, () => {
             direction.value = 'backward';
@@ -451,6 +511,13 @@ export function createGZRouter(options: GZRouterOptions): GZRouter {
   function unregisterGuard(map: Map<number, Set<NavigationGuard>>, entryId: number, guard: NavigationGuard) {
     map.get(entryId)?.delete(guard);
   }
+  function registerCallback<T>(map: Map<number, Set<T>>, entryId: number, callback: T) {
+    if (!map.has(entryId)) map.set(entryId, new Set());
+    map.get(entryId)!.add(callback);
+  }
+  function unregisterCallback<T>(map: Map<number, Set<T>>, entryId: number, callback: T) {
+    map.get(entryId)?.delete(callback);
+  }
 
   const router: GZRouter = {
     currentRoute,
@@ -469,6 +536,10 @@ export function createGZRouter(options: GZRouterOptions): GZRouter {
     _unregisterLeaveGuard: (entryId, guard) => unregisterGuard(leaveGuardsMap, entryId, guard),
     _registerUpdateGuard: (entryId, guard) => registerGuard(updateGuardsMap, entryId, guard),
     _unregisterUpdateGuard: (entryId, guard) => unregisterGuard(updateGuardsMap, entryId, guard),
+    _registerEnterGuard: (entryId, guard) => registerGuard(enterGuardsMap, entryId, guard),
+    _unregisterEnterGuard: (entryId, guard) => unregisterGuard(enterGuardsMap, entryId, guard),
+    _registerActivatedCallback: (entryId, callback) => registerCallback(activatedCallbacksMap, entryId, callback),
+    _unregisterActivatedCallback: (entryId, callback) => unregisterCallback(activatedCallbacksMap, entryId, callback),
     install(app: App) {
       app.provide(ROUTER_KEY, router);
       app.provide(ROUTE_KEY, currentRoute);
