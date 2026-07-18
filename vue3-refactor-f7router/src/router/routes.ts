@@ -1,6 +1,7 @@
 import type { RouteRecordRaw } from 'gz-vue-router';
 import HomePage from '../pages/HomePage.vue';
 import DetailPage from '../pages/DetailPage.vue';
+import LoginPage from '../pages/LoginPage.vue';
 import ConfirmDialog from '../pages/ConfirmDialog.vue';
 import TestPage from '../pages/TestPage.vue';
 import DashboardLayout from '../pages/DashboardLayout.vue';
@@ -39,6 +40,7 @@ export const routes: RouteRecordRaw[] = [
     meta: { modal: true, title: '二级弹层', modalStyle: { maxWidth: '400px' } },
   },
   { path: '/test', name: 'test', component: TestPage, meta: { title: '深链接测试页' } },
+  { path: '/login', name: 'login', component: LoginPage, meta: { title: '登录' } },
   {
     // 嵌套路由演示：/dashboard 本身不独立可匹配（vue-router 语义，没有 path:'' 的默认子路由），
     // 父路由的 beforeEnter 会级联作用到 /dashboard/overview 和 /dashboard/stats 两条子路由上

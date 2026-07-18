@@ -63,10 +63,17 @@ export type NavigationGuardReturn = void | boolean | string | RouteLocationRaw;
 /**
  * 导航守卫。支持两种调用方式（和 vue-router 一致），用单一函数签名（而不是两个函数类型的
  * union）声明，是为了让 TS 能对传进来的箭头函数做正确的上下文类型推导（union 类型会导致
- * `to`/`from` 参数被推成 any）：
+ * `to`/`from` 参数被推成 any，见 CLAUDE.md 设计决策 8）：
  * - 现代写法：只声明 `(to, from)`，返回值决定放行/取消/重定向，支持返回 Promise
  * - 兼容写法：声明第三个 `next` 参数，通过运行时判断函数的形参个数（arity）来识别并调用
  *   `next()`/`next(false)`/`next('/path')`
+ *
+ * `next` 在类型上是可选的——这是必须的，因为同一个类型既要兼容"只声明 2 个参数"的现代写法，
+ * 也要兼容"声明 3 个参数"的兼容写法（一个要求 3 个参数都必填的重载签名会让两种写法互不兼容，
+ * 实测会报"Expected 3 or more, but got 2"）。代价是写兼容写法时，TS 会认为 `next` 可能是
+ * `undefined`，需要用 `next?.(...)` 调用，而不是 `next(...)`——这不是疏漏，运行时
+ * （`guards.ts` 的 `runGuard`）保证只要声明了第三个形参就一定会传入真正的 `next` 函数，
+ * `next?.(...)` 在这里永远会成功调用，只是满足 TS 的判空要求。
  */
 export type NavigationGuard = (
   to: RouteLocationNormalized,
