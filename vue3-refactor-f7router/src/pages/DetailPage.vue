@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'gz-vue-router';
+import { useRouter, onBeforeRouteLeave, onBeforeRouteUpdate, onBeforeRouteEnter } from 'gz-vue-router';
+import NestedChildLevel1 from '../components/NestedChildLevel1.vue';
 
 const props = defineProps<{ id: string }>();
 const router = useRouter();
@@ -24,6 +25,12 @@ onBeforeRouteLeave(() => {
 onBeforeRouteUpdate((to) => {
   updateCount.value += 1;
   console.info(`[onBeforeRouteUpdate] id: ${props.id} -> ${to.params.id}`);
+});
+
+// 这个组件实例本来没被销毁（一直挂在背景里），重新变回当前页时触发——比如从深一层的详情页
+// 应用内/物理返回到这一层
+onBeforeRouteEnter((to) => {
+  console.info(`[onBeforeRouteEnter] re-entering detail as ${to.fullPath}`);
 });
 
 function goDeeper() {
@@ -85,6 +92,19 @@ function goBack() {
           </v-card-item>
           <v-card-text>
             <v-checkbox v-model="hasUnsavedChanges" label="模拟这个页面有未保存的更改" hide-details density="compact" />
+          </v-card-text>
+        </v-card>
+
+        <v-card class="mt-4">
+          <v-card-item>
+            <v-card-title class="text-body-1">多级嵌套子组件的路由钩子验证</v-card-title>
+            <v-card-subtitle>
+              下面三层是普通的父子组件嵌套（不是路由记录链），验证 inject(ENTRY_ID_KEY) 能穿透任意深度，
+              四个钩子在深层子组件里注册和在页面根组件注册效果一致
+            </v-card-subtitle>
+          </v-card-item>
+          <v-card-text>
+            <NestedChildLevel1 :id="id" />
           </v-card-text>
         </v-card>
       </v-container>
