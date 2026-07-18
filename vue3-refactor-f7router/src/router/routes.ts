@@ -31,13 +31,13 @@ export const routes: RouteRecordRaw[] = [
     path: '/settings',
     name: 'settings',
     component: defineAsyncComponent(() => import('../pages/SettingsDialog.vue')),
-    meta: { modal: true, title: '设置', modalStyle: { maxWidth: '480px' } },
+    meta: { modal: true, title: '设置', modalStyle: { background: 'none' } },
   },
   {
     path: '/settings/confirm',
     name: 'confirm',
     component: ConfirmDialog,
-    meta: { modal: true, title: '二级弹层', modalStyle: { maxWidth: '400px' } },
+    meta: { modal: true, title: '二级弹层',  },
   },
   { path: '/test', name: 'test', component: TestPage, meta: { title: '深链接测试页' } },
   { path: '/login', name: 'login', component: LoginPage, meta: { title: '登录' } },
@@ -47,7 +47,7 @@ export const routes: RouteRecordRaw[] = [
     path: '/dashboard',
     name: 'dashboard',
     component: DashboardLayout,
-    meta: { title: '仪表盘', auth: true },
+    meta: { title: '仪表盘', auth: false },
     beforeEnter: (to) => {
       console.info(`[beforeEnter] 进入 dashboard 分区：${to.fullPath}（父路由守卫，对所有子路由生效）`);
       return true;

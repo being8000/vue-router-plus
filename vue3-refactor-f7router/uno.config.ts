@@ -38,6 +38,13 @@ export default defineConfig({
   theme: {
     fontFamily: {},
     colors: themes.dark.colors,
+    screens: {
+      'sm': '600px',   // 对应 Vuetify 的 sm
+      'md': '960px',   // 对应 Vuetify 的 md
+      'lg': '1280px',  // 对应 Vuetify 的 lg
+      'xl': '1920px',  // 对应 Vuetify 的 xl
+      'xxl': '2560px', // 对应 Vuetify 的 xxl (替代默认的 2xl)
+    },
   },
   presets: [
     presetAttributify(),

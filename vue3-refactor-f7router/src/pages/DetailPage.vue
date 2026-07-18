@@ -114,7 +114,7 @@ function goBack() {
 
 <style scoped>
 .page-shell {
-  height: 100%;
+  height: 150%;
   display: flex;
   flex-direction: column;
   background: rgb(var(--v-theme-background));

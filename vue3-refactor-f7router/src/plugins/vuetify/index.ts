@@ -8,7 +8,7 @@ import { themes } from './theme';
 // 换成 unocss 的 i-mdi:xxx 命名需要同步改所有页面，暂不做这个迁移。
 export const vuetify = createVuetify({
   theme: {
-    defaultTheme: 'light',
+    defaultTheme: 'dark',
     themes,
   },
 });

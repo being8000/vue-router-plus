@@ -53,14 +53,13 @@ onRouteActivated((to) => {
 
 <template>
   <div class="page-shell">
-    <v-toolbar color="primary" density="comfortable" flat>
+    <v-toolbar color="primary" density="comfortable" >
       <v-toolbar-title>首页</v-toolbar-title>
       <template #append>
         <v-btn icon="mdi-cog" @click="openSettings" />
       </template>
     </v-toolbar>
     <div class="page-shell__content">
-      <v-container>
         <v-alert type="info" variant="tonal" class="mb-4" density="compact">
           这是 gz-vue-router 的验证页面：点击列表项走"前进"过渡（新页从右侧滑入），
           右上角齿轮按钮以 URL 弹层方式打开设置。
@@ -83,14 +82,14 @@ onRouteActivated((to) => {
         </v-list>
         <v-btn class="mt-4" variant="outlined" block @click="openInvalidDetail">
           跳转到订单 #999（会被 beforeEnter 拦截并重定向回首页）
-        </v-btn>
-        <v-btn class="mt-2" variant="tonal" block @click="openDashboard">
+        </v-btn> 
+        <v-btn class="mt-2" variant="tonal"  @click="openDashboard">
           打开仪表盘（嵌套路由：布局 + 子路由 + 父路由守卫级联演示）
         </v-btn>
         <div>
           <input type="text" style="height: 20px; width: 100px;">
         </div>
-      </v-container>
+     
     </div>
   </div>
 </template>

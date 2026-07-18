@@ -14,7 +14,7 @@ function replaceConfirm() {
 </script>
 
 <template>
-  <v-card>
+  <v-card class="tw-max-w-100" style="max-width: 500px;margin-bottom: 200px;">
     <v-card-title>设置</v-card-title>
     <v-card-text>
       这是一个"URL 可寻址"的弹层路由（对应文档里 F7 modal.js 的设计模式）：

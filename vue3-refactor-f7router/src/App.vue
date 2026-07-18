@@ -1,14 +1,45 @@
 <script setup lang="ts">
 import { GZRouterView, GZModalView } from 'gz-vue-router';
+import { useDisplay } from 'vuetify';
+const isRightDrawerOpen = ref(false)
+// 解构出当前分辨率的判断状态（已在 tailwind.config.js 中对齐）
+const { mdAndUp, lgAndUp } = useDisplay()
 </script>
 
 <template>
-	<v-app class="app-root">
-		<div class="app-viewport">
-			<GZRouterView />
-		</div>
+	<v-app class="app-root app-viewport">
+		<v-navigation-drawer app :rail="!lgAndUp" :permanent="mdAndUp">
+			<!-- 菜单内容 -->
+		</v-navigation-drawer>
+		<v-main app>
+			<v-container>
+        <GZRouterView />
+      </v-container>
+		</v-main>
+		<v-navigation-drawer
+		v-model="isRightDrawerOpen"
+		location="right"
+		:width="lgAndUp ? 400 : 320"
+		:temporary="!lgAndUp"
+	>
+		<div class="pa-4 flex flex-col h-full justify-between">
+			<!-- Top Action Items -->
+			<div class="space-y-4">
+				<h3 class="text-gray-900 font-medium">Element Properties</h3>
+				<v-text-field label="Component ID" density="compact" hide-details class="mb-2"></v-text-field>
+				<v-select :items="['Active', 'Disabled', 'Draft']" label="Status" density="compact" hide-details></v-select>
+			</div>
 
-		<GZModalView />
+			<!-- Sticky Footer Actions (PC Layout Standard) -->
+			<div class="border-t border-gray-100 pt-4 bg-white flex justify-end space-x-2">
+				<v-btn variant="outlined" color="secondary" size="small" @click="isRightDrawerOpen = false">Cancel</v-btn>
+				<v-btn color="primary" size="small" elevation="0">Save Changes</v-btn>
+			</div>
+		</div>
+	</v-navigation-drawer>
+		<Teleport to="body">
+			<GZModalView />
+		</Teleport>
 	</v-app>
 </template>
 
@@ -17,9 +48,9 @@ import { GZRouterView, GZModalView } from 'gz-vue-router';
 	/* min-height: 100%;
 	height: 100%; */
 }
-.app-root .page-shell__content>.v-container{
-	padding: 0px;
-}
+
+.app-root .page-shell__content>.v-container {}
+
 .app-viewport {
 	flex: 1 1 auto;
 	min-height: 0;

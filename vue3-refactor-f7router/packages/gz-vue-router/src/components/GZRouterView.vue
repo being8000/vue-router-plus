@@ -66,18 +66,18 @@ const groupName = computed(() => (router.direction.value === 'backward' ? 'gz-pa
 
 <template>
   <component :is="nestedComponent" v-if="isNested" v-bind="nestedParams" />
-  <TransitionGroup v-else tag="div" class="gz-router-view" :name="groupName">
+  <template v-else tag="div" class="gz-router-view" :name="groupName">
     <div
       v-for="entry in renderedEntries"
       :key="entry.id"
-      class="gz-router-view__page"
+      class="gz-router-view__page gz-router-view"
       :class="entryClass(entry)"
     >
       <EntryProvider :entry-id="entry.id" :chain="entry.matched.chain" :params="entry.matched.params">
         <component :is="entry.matched.chain[0].component" v-bind="entry.matched.params" />
       </EntryProvider>
     </div>
-  </TransitionGroup>
+  </template>
 </template>
 
 <style scoped>
@@ -98,6 +98,7 @@ const groupName = computed(() => (router.direction.value === 'backward' ? 'gz-pa
 .gz-router-view__page.is-current {
   transform: translate3d(0, 0, 0);
   z-index: 2;
+  position: relative;
 }
 .gz-router-view__page.is-previous {
   transform: translate3d(-24px, 0, 0);
