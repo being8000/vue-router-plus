@@ -36,8 +36,28 @@ const nestedParams = computed(() => {
 
 const router = useRouter();
 
-// 只需要同时挂载“当前页”和“上一页”两层，其余更早的页面对视觉上没有意义（已被完全遮住）
-const visibleEntries = computed(() => router.stack.slice(-2));
+// 正常只需要同时挂载“当前页”和“上一页”两层，其余更早的页面对视觉上没有意义（已被完全遮住），
+// 直接不渲染让 Vue 卸载即可。但标了 route.persistent 的页面例外：即使被挤出这两层可视窗口，
+// 也要继续渲染（只是隐藏），保持组件实例不被销毁——见下面 renderedEntries 的合并逻辑。
+const top = computed(() => router.stack[router.stack.length - 1]);
+const previous = computed(() => router.stack[router.stack.length - 2]);
+
+// 顺序：is-dormant 的常驻页面排前面，当前/上一页排后面（顺序不影响视觉——三种状态的层叠顺序
+// 完全由各自 class 的 z-index 决定，这里只是让常驻页面在数组前面保持相对稳定）。
+// 用同一个数组、只是给已有元素换 class 的方式，能让这几个 entry 从头到尾待在 TransitionGroup
+// 同一份被追踪的子节点列表里——之后从 is-dormant 变成 is-previous/is-current 只是一次 class
+// 切换，不会被 TransitionGroup 当成“新增”，不会触发 enter 过渡、更不会重新挂载组件。
+const renderedEntries = computed(() => {
+  const last2 = router.stack.slice(-2);
+  const dormant = router.stack.filter((entry) => !last2.includes(entry) && entry.matched.route.persistent);
+  return [...dormant, ...last2];
+});
+
+function entryClass(entry: (typeof renderedEntries.value)[number]) {
+  if (entry === top.value) return 'is-current';
+  if (entry === previous.value) return 'is-previous';
+  return 'is-dormant';
+}
 
 // direction 是页面栈上“这次导航方向”的独立引用（不挂在具体某个 entry 上），
 // 这样无论是应用内返回按钮还是物理/手势返回触发的 popstate，都能拿到正确的方向。
@@ -48,10 +68,10 @@ const groupName = computed(() => (router.direction.value === 'backward' ? 'gz-pa
   <component :is="nestedComponent" v-if="isNested" v-bind="nestedParams" />
   <TransitionGroup v-else tag="div" class="gz-router-view" :name="groupName">
     <div
-      v-for="(entry, index) in visibleEntries"
+      v-for="entry in renderedEntries"
       :key="entry.id"
       class="gz-router-view__page"
-      :class="index === visibleEntries.length - 1 ? 'is-current' : 'is-previous'"
+      :class="entryClass(entry)"
     >
       <EntryProvider :entry-id="entry.id" :chain="entry.matched.chain" :params="entry.matched.params">
         <component :is="entry.matched.chain[0].component" v-bind="entry.matched.params" />
@@ -84,5 +104,12 @@ const groupName = computed(() => (router.direction.value === 'backward' ? 'gz-pa
   z-index: 1;
   /* 退居后一层的页面仅做视觉展示，不应再响应点击/聚焦 */
   pointer-events: none;
+}
+.gz-router-view__page.is-dormant {
+  /* persistent 页面被挤出可视窗口时的状态：组件继续挂载（状态保留），但不可见、不可交互，
+     也不参与层叠——visibility:hidden 顺带把它从 tab 顺序/无障碍树里摘掉，比 opacity:0 更彻底 */
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
 }
 </style>

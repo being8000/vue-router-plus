@@ -112,6 +112,19 @@ createGZRouter() ---持有响应式状态---> stack / modalStack / direction / c
     - 反过来，"重新激活"（组件本来就没销毁，只是从 `is-previous` 被顶回 `is-current`）不会重新触发 `onMounted`，这部分靠 `router.ts` 里单独一张 `activatedCallbacksMap`（不是复用 `enterGuardsMap`——`onBeforeRouteEnter` 是可取消的导航守卫，混进同一张表会让"纯通知"钩子意外获得取消导航的副作用），在 `withGuards` 的 `mutate()` 之后统一对比 mutate 前后的 `top`/`topModal` id 是否变化来触发，一个地方就能覆盖 `push`/`replace`/`back`/`popstate` 所有分支，不需要像 `onBeforeRouteEnter` 那样在四个分支分别判断"是否已经预挂载"。
     - 两路信号天然互斥：已经存活的实例走登记表这一路（`onMounted` 不会重跑），全新创建的实例走 `onMounted`+校验这一路（登记表在这个 entryId 上还没有任何注册，查表是空操作），不会重复触发。
 
+16. **`persistent`（`RouteRecordRaw.persistent`）是纯渲染层 + 守卫判断层的改动，不改 `stack` 本身的数据结构/mutate 逻辑。**
+    - 关键前提：`stack` 数组本来就永久保留所有 entry（`push`/`back`/`popstate` 从不因为"超出两层可视窗口"去删它），只有 `<GZRouterView>` 的渲染层用 `slice(-2)` 决定挂载谁——所以"持久化"不需要改数据结构，只需要让渲染层对 `persistent` entry 网开一面。
+    - `GZRouterView.vue`：`renderedEntries` = `[...被挤出窗口但 persistent 的 entry, ...stack.slice(-2)]`，靠 `entryClass()`（用 `===` 比较 `top`/`previous`，不是数组下标）分成 `is-current`/`is-previous`/`is-dormant` 三态。这个 entry 从 `is-dormant` 变到 `is-previous`/`is-current` 只是同一个 TransitionGroup 子节点的 class 切换（key 全程不变），不会被当成"新增"触发 enter 过渡、更不会重新挂载组件——这是持久化能生效的关键，如果哪天重构成"不在窗口内就 `v-if` 掉"，会直接破坏这个特性。
+    - 只有一处守卫判断需要联动改：`popstate` 里多级跳跃的 `pageIndex` 分支，`wasAlreadyMounted` 原本只认"物理返回恰好一层"（`pageIndex === stack.length - 2`），现在要 `|| entering.matched.route.persistent`——否则一次跳好几级直接落到一个 persistent 页面上时，明明组件从来没被销毁过，却会被误判成"全新创建"，不触发 `onBeforeRouteEnter`。`back()` 自己的单层 pop 分支不用改（本来就总是恰好一层，判断天然成立）。
+    - `onRouteActivated`（设计决策 15）**完全不用改**：它的两路信号本来就是"这个 entryId 是不是真的还活着"的通用判断（`onMounted`+校验栈顶、或者已注册的登记表），不关心"活着"是因为在两层窗口内还是因为 `persistent`，天然兼容。
+    - 只在 `matched.route.persistent`（叶子）上检查，不沿 `chain` 级联——嵌套路由如果要整体持久化，应该在叶子路由上标，不是在布局（`chain[0]`）上标。
+    - **隐含不变量：标了 `persistent` 的路由，页面栈里任何时刻最多只有一个存活实例。** `push()`/`replace()` 创建新 entry 之前都要先用 `findPersistentEntry` 查一遍 `stack` 里是否已经有活的，有就用 `promoteExistingEntry` 挪上来复用，不能无条件新建——不然会同时存在两个同路由的 entry、状态互不相通，详见 [bugs/0006](./bugs/0006-persistent-push-creates-duplicate-entry.md)。
+
+17. **`guards` 数组的拼接顺序：`beforeEach`/`beforeEnter` 永远排在 leave/update/enter 守卫前面。**
+    - 这两类守卫的性质不一样：`beforeEach`/`beforeEnter` 回答的是"这次导航合不合法/有没有资格发生"（权限、参数校验……），`onBeforeRouteLeave`/`onBeforeRouteUpdate`/`onBeforeRouteEnter` 回答的是"某个具体组件对这次导航的局部感知"（要不要确认离开、参数变了要不要刷新……），后者只有在前者已经放行的前提下才有意义去问。
+    - `runGuardSequence` 是顺序执行、遇到第一个不放行就短路——数组顺序直接决定了"谁的副作用会不会被无意义触发"。如果把 leave/update 守卫排在前面，目标一旦被 `beforeEach`/`beforeEnter` 拦截，这些守卫的副作用（`console.log`、`window.confirm` 弹窗……）已经无条件跑过了，即使最终没有真的导航过去，详见 [bugs/0007](./bugs/0007-leave-guard-fires-before-blocking-guards.md)。
+    - 这个顺序要求覆盖 `router.ts` 里所有拼 `guards` 数组的地方（`push`/`replace`/`replaceModal`、`back()` 的四个分支、`popstate` 的四个分支）——新增任何调用 `withGuards` 的地方，先把 `beforeEachGuards`/`collectChainGuards(matched)` 放进数组最前面，再拼局部守卫。
+
 ## Bug 修复日志
 
 每一处 bug 修复都在 [`bugs/`](./bugs/) 目录下单独建档（现象/根因/修复/验证），不在这份文件里堆叙述。按修复时间顺序：
@@ -121,6 +134,8 @@ createGZRouter() ---持有响应式状态---> stack / modalStack / direction / c
 - [0003 - Vuetify v-dialog 的 closeOnBack 特性和自己的 popstate 处理互相打架](./bugs/0003-vdialog-closeonback-conflict.md)
 - [0004 - 弹层栈内多级 popstate 被拦截时，撤销方向写反了](./bugs/0004-modal-popstate-undo-direction-wrong.md)
 - [0005 - 物理前进重新落到弹层 URL 时，把还在下面的弹层也顶掉了](./bugs/0005-physical-forward-into-modal-wipes-stack.md)
+- [0006 - 前进导航到一条 persistent 路由时，没有复用已存活的实例，创建了重复的 entry](./bugs/0006-persistent-push-creates-duplicate-entry.md)
+- [0007 - 目标路由被 beforeEach/beforeEnter 拦截时，onBeforeRouteLeave/onBeforeRouteUpdate 已经先触发了](./bugs/0007-leave-guard-fires-before-blocking-guards.md)
 
 新增条目时文件名用 `编号-简短英文/拼音描述.md`，编号接着现有最大编号往下顺延。
 
@@ -141,6 +156,8 @@ createGZRouter() ---持有响应式状态---> stack / modalStack / direction / c
   6. 守卫：`beforeEnter` 拦截+重定向、`onBeforeRouteLeave` 取消/放行、`onBeforeRouteUpdate` 触发但不重新挂载组件
   11. **`onBeforeRouteEnter`**：前进一层（组件保留在背景里）后应用内/物理返回——只触发 `onBeforeRouteEnter`，不触发 `onMounted`，组件实例标记不变；前进两层以上（组件已经真的被挤出去销毁过）后再返回——触发的是 `onMounted` 不是 `onBeforeRouteEnter`；连续两次返回时如果第一次返回让某个 entry 从"销毁状态"变成"挂载状态"，紧接着的第二次返回如果命中它，应该正确判定为"已挂载"（多步物理返回场景，容易漏测）
   12. **`onRouteActivated`**：首屏加载、以及 `push`/`replace` 新建 entry 都要触发；标准的"回退一层、组件保留在背景里"场景要触发（和 `onBeforeRouteEnter` 同时触发，不重复不遗漏）；**关键边界场景**——深入 2 级以上后物理返回，某个早被销毁的 entry 被顺带带回可视窗口但只是排在 `is-previous` 位置（`onMounted` 会触发），此时**不应该**触发 `onRouteActivated`；紧接着再返回一步，这个 entry 变成真正的 `is-current`（这次是重新激活，不重新 `onMounted`），才应该触发
+  13. **`persistent`**：标了 `persistent` 的页面深入 N 层（N > 2）之后，DOM 里应该还能查到它（`class` 里带 `is-dormant`），不应该触发它的 `onUnmounted`；从深层用 `history.go(-N)` **一次性**跳回它（真正的单次多级 popstate，不是连点几次物理返回——那样会拆成好几次单级 popstate，测不出这个分支）：不应该触发 `onMounted`，应该触发 `onBeforeRouteEnter` 和 `onRouteActivated`；**用 `push()`/`replace()`（应用内前进，包括守卫重定向触发的那种）导航回一条已经存活的 persistent 路由**：DOM 里应该只有一份该路由的 entry（不能同时出现两个），不触发 `onMounted`，触发 `onBeforeRouteEnter`/`onRouteActivated`（bugs/0006 专门测的场景）
+  14. **守卫顺序**：给目标路由挂一个无条件拦截的 `beforeEach`（或 `beforeEnter`），从当前页发起导航——当前页的 `onBeforeRouteLeave`/`onBeforeRouteUpdate` **不应该**出现在 console 里（导航压根没资格发生，不该问"要不要离开"）；换成一个会放行的 `beforeEach`，正常导航一次，`onBeforeRouteLeave` 应该照常触发（确认没有连带把正常场景也拦掉）；守卫重定向场景（`beforeEnter` 返回字符串）下，离开守卫应该只触发一次（在重定向目标那次导航里），不应该在被拦截的原始导航里也触发一次（bugs/0007）
   7. 守卫重定向回"当前就在的页面"时，确认没有多余的 stack 节点、没有多播一次过渡动画——用 `MutationObserver` 盯 class 变化比截图肉眼看更可靠
   8. **弹层栈叠加**：`push` 打开二级弹层要保留一级弹层挂载，`replace` 要销毁一级弹层；关闭/物理返回/物理前进要能正确地一层一层增减，且不能相互吞掉对方（0005）
   9. **弹层内容里的 `onBeforeRouteLeave`/`onBeforeRouteUpdate`** 要能正常触发（弹层组件也走 `EntryProvider`）

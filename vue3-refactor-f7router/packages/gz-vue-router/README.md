@@ -157,6 +157,7 @@ onRouteActivated((to) => {
 | `meta.title` | 仅作为约定字段，本身不做任何事，配合 `afterEach` 可实现标题同步等副作用 |
 | `beforeEnter` | 路由独享守卫，进入这条路由、或进入它的任意子孙路由时都会触发（见下文"嵌套路由"） |
 | `children` | 子路由数组，见下文"嵌套路由" |
+| `persistent` | `true` 表示这个页面即使被挤出 `<GZRouterView>` 最后两层的可视窗口，组件实例也不销毁（见下文"持久化页面"） |
 
 ### `GZRouter`（`useRouter()` 拿到的实例）
 
@@ -179,7 +180,9 @@ onRouteActivated((to) => {
 - `false`：取消本次导航
 - 字符串或 `{name, params, query}`：重定向
 
-优先级（同一次导航里的执行顺序）：**离开守卫（onBeforeRouteLeave/onBeforeRouteUpdate）→ 全局 `beforeEach` → 目标路由的 `beforeEnter` → 进入守卫（onBeforeRouteEnter）**，全部通过才会真正修改页面栈/弹层栈/历史记录，然后触发全局 `afterEach`。
+优先级（同一次导航里的执行顺序）：**全局 `beforeEach` → 目标路由的 `beforeEnter` → 离开/更新守卫（onBeforeRouteLeave/onBeforeRouteUpdate）→ 进入守卫（onBeforeRouteEnter）**，全部通过才会真正修改页面栈/弹层栈/历史记录，然后触发全局 `afterEach`。
+
+`beforeEach`/`beforeEnter`故意排在最前面：它们决定的是"这次导航到底有没有资格发生"（权限校验、参数校验……），只有它们都放行了，才有必要去问当前页"要不要离开"——如果先跑离开守卫、再被 `beforeEach`/`beforeEnter` 拦下，用户会经历"确认要离开"（甚至一个 `window.confirm` 弹窗）之后却发现根本没跳转的诡异体验。
 
 重定向目标如果就是用户当前已经停留的页面，不会产生任何导航效果（不入栈、不播放过渡动画）——只有重定向到一个**不同**的页面时才会像一次正常的 `push` 一样播放过渡动画。
 
@@ -269,6 +272,20 @@ import { GZRouterView } from 'gz-vue-router';
 - **`meta` 浅合并**：`to.meta` 是从根到叶按顺序合并的结果，子路由能覆盖父路由的同名字段。
 - **在兄弟子路由之间用 `replace()` 切换，布局不会重新挂载**：`replace()` 判断"是否原地更新"的依据从"叶子组件是否相同"扩展成了"路由记录链的根（`chain[0]`）是否相同"——只要挂的是同一个布局，切换子路由时布局组件实例保留（可以在布局里用 `onBeforeRouteUpdate` 感知子路由变化），只有子路由自己的内容会重新挂载。用 `push()` 则总是完整地一次前进导航，会带着布局一起重新挂载（想要"标签页切换"的观感请用 `replace()`，想要"进入一个新页面"的观感用 `push()`）。
 
+## 持久化页面（`persistent`）
+
+`<GZRouterView>` 正常只同时挂载页面栈最后两层（当前页 + 上一页），更早的页面一旦被挤出这个窗口就会真正卸载。给某个核心页面（比如首页）设置 `persistent: true`，可以让它例外：
+
+```ts
+{ path: '/', name: 'home', component: HomePage, persistent: true }
+```
+
+- 即使这个页面被挤出可视窗口（导航深了不止一层），组件实例也**不会**被销毁——只是隐藏起来（不可见、不可交互），状态原样保留。
+- 之后不管从多深的地方返回，只要最终又回到这个页面，都会被当成"重新变回当前页"处理：`onBeforeRouteEnter`/`onRouteActivated` 正常触发，**不会**触发 `onMounted`——和"只前进了一层、还在两层可视窗口内"的普通场景完全一样，业务代码不需要关心自己是靠"还在两层窗口内"活着的还是靠 `persistent` 活着的。
+- 只在路由表的叶子记录上检查这个字段，不会像 `beforeEnter` 那样沿 `children` 级联；弹层路由（`meta.modal`）不需要它——`modalStack` 本来就整体常驻挂载，从打开到关闭全程不卸载。
+- **页面栈里任何时刻最多只有一个这条路由的实例**：不管是用 `back()`/物理返回"回到"它，还是用 `push()`/`replace()`"前进导航到"它（包括守卫重定向内部触发的 `push`，比如某个页面的 `beforeEnter` 把用户重定向回首页）——只要它已经在栈里活着，都会被复用、挪到栈顶，而不是创建第二个实例。
+- 只影响"要不要保留组件实例"，不影响页面栈本身的历史记录语义：如果这个页面被 `replace()` 直接换掉，或者因为浏览器历史截断（导航到别的分支）被移出 `stack`，仍然会被真正销毁——`persistent` 保护的是"别因为纯粹的可视窗口裁剪就被卸载"，不是"永远不销毁"。
+
 ## 已知限制
 
 - 物理前进/后退如果被守卫拦截，会调用 `history.go()` 撤销已经发生的浏览器导航，中间会有一瞬间的地址栏闪烁——这是 History API 的固有限制（vue-router 自己也是这样处理的）。
@@ -280,6 +297,7 @@ import { GZRouterView } from 'gz-vue-router';
 - 首屏落地不会触发 `beforeEach`/`beforeEnter`（避免被拦截后卡在空白页、没有兜底），只会触发 `afterEach` 这类只读副作用。
 - **不会**、也**不应该**设置 `app.config.globalProperties.$router`/`$route`：Vuetify 的 `<v-dialog>`/`<v-menu>` 等组件（基于 `VOverlay`）会自动探测 `$router` 是否存在，探测到就注册自己的一套"物理返回关闭浮层"逻辑，和这个包自己的 `popstate` 处理会互相打架、导致死循环。这也是弹层渲染改成自己实现而不是包一层 `<v-dialog>` 的直接原因，详见 [`CLAUDE.md`](./CLAUDE.md) 和 [`bugs/0003`](./bugs/0003-vdialog-closeonback-conflict.md)。
 - 弹层没有 Esc 键关闭，只支持点遮罩关闭。
+- `persistent` 页面的组件实例会跟随整个会话一直存活（除非被 `replace()` 换掉或被历史截断），谨慎用在真正需要"离开也不丢状态"的少数核心页面上，不要给所有页面都标上——不然起不到"只挂载最后两层"节省内存/DOM 的效果。
 
 ## 目录结构
 

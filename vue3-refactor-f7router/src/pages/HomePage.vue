@@ -87,6 +87,9 @@ onRouteActivated((to) => {
         <v-btn class="mt-2" variant="tonal" block @click="openDashboard">
           打开仪表盘（嵌套路由：布局 + 子路由 + 父路由守卫级联演示）
         </v-btn>
+        <div>
+          <input type="text" style="height: 20px; width: 100px;">
+        </div>
       </v-container>
     </div>
   </div>

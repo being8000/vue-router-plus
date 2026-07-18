@@ -1,15 +1,15 @@
 import type { RouteRecordRaw } from 'gz-vue-router';
 import HomePage from '../pages/HomePage.vue';
 import DetailPage from '../pages/DetailPage.vue';
-import SettingsDialog from '../pages/SettingsDialog.vue';
 import ConfirmDialog from '../pages/ConfirmDialog.vue';
 import TestPage from '../pages/TestPage.vue';
 import DashboardLayout from '../pages/DashboardLayout.vue';
 import DashboardOverview from '../pages/DashboardOverview.vue';
 import DashboardStats from '../pages/DashboardStats.vue';
+import { defineAsyncComponent } from 'vue';
 
 export const routes: RouteRecordRaw[] = [
-  { path: '/', name: 'home', component: HomePage, meta: { title: '首页' } },
+  { path: '/', name: 'home', component: HomePage, meta: { title: '首页' }, persistent: true },
   {
     path: '/detail/:id',
     name: 'detail',
@@ -29,7 +29,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/settings',
     name: 'settings',
-    component: SettingsDialog,
+    component: defineAsyncComponent(() => import('../pages/SettingsDialog.vue')),
     meta: { modal: true, title: '设置', modalStyle: { maxWidth: '480px' } },
   },
   {
@@ -45,7 +45,7 @@ export const routes: RouteRecordRaw[] = [
     path: '/dashboard',
     name: 'dashboard',
     component: DashboardLayout,
-    meta: { title: '仪表盘' },
+    meta: { title: '仪表盘', auth: true },
     beforeEnter: (to) => {
       console.info(`[beforeEnter] 进入 dashboard 分区：${to.fullPath}（父路由守卫，对所有子路由生效）`);
       return true;

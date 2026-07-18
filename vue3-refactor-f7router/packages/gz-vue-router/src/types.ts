@@ -37,6 +37,15 @@ export interface RouteRecordRaw {
    * 布局组件自己的模板里放一个嵌套的 <GZRouterView> 来渲染匹配到的子路由。
    */
   children?: RouteRecordRaw[];
+  /**
+   * 标记这条路由对应的页面栈 entry 为"持久化"：正常情况下 <GZRouterView> 只同时挂载页面栈
+   * 最后两条（当前页 + 上一页），更早的会被真正卸载；标了 persistent 的页面即使被挤出这两层
+   * 可视窗口，组件实例也不会被销毁（只是隐藏），之后不管跳出去多少层再返回，都是"重新变回
+   * 当前页"而不是重新创建——onBeforeRouteEnter/onRouteActivated 会按重新激活来触发，不会
+   * 触发 onMounted。只在页面栈叶子路由上检查（不像 beforeEnter 那样沿 chain 级联），
+   * 弹层路由（meta.modal）不需要这个——modalStack 本来就整体常驻挂载。
+   */
+  persistent?: boolean;
 }
 
 /** 归一化后的当前路由信息，对齐 vue-router 的 RouteLocationNormalized（裁剪掉本项目用不到的字段） */
