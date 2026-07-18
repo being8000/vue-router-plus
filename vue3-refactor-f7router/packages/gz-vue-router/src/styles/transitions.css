@@ -1,0 +1,80 @@
+/*
+ * gz-vue-router 默认的页面切换动画（仅 Android/Material Design 一套），
+ * keyframes 数值移植自 framework7 的 page-md.less，改写成 Vue <TransitionGroup>
+ * 可用的 *-enter-active / *-leave-active 命名规则。
+ *
+ * 设计对应关系：
+ * - “前进”导航：新页从右侧滑入覆盖（enter），旧页不离开 DOM，只是被 <GZRouterView> 的
+ *   is-current/is-previous class 切换带到 -24px（这一步走组件自身的 `transition: transform`，
+ *   不需要在这里处理）。
+ * - “后退”导航：当前页真正从 DOM 移除时，需要滑出 + 淡出（leave）。
+ */
+
+:root {
+  --gz-page-transition-duration: 400ms;
+}
+
+.gz-page-fwd-enter-active {
+  transition: none;
+  animation: gz-page-next-to-current var(--gz-page-transition-duration) cubic-bezier(0, 0.8, 0.3, 1) forwards;
+  z-index: 3;
+}
+.gz-page-fwd-leave-active {
+  /* 前进时旧页永远不会真正离开可见窗口（只会被推到第三层才移除），无需动画 */
+  transition: none;
+  animation: none;
+}
+
+.gz-page-bwd-enter-active {
+  transition: none;
+  animation: gz-page-previous-to-current calc(var(--gz-page-transition-duration) / 2) cubic-bezier(0, 1, 0.8, 1)
+    forwards;
+}
+.gz-page-bwd-leave-active {
+  transition: none;
+  animation:
+    gz-page-current-to-next calc(var(--gz-page-transition-duration) / 2) cubic-bezier(0, 1, 0.8, 1) forwards,
+    gz-fade-out calc(var(--gz-page-transition-duration) / 2) forwards;
+  z-index: 3;
+}
+
+@keyframes gz-page-next-to-current {
+  from {
+    transform: translate3d(100%, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+@keyframes gz-page-current-to-previous {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-24px, 0, 0);
+  }
+}
+@keyframes gz-page-previous-to-current {
+  from {
+    transform: translate3d(-24px, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+@keyframes gz-page-current-to-next {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(100%, 0, 0);
+  }
+}
+@keyframes gz-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
