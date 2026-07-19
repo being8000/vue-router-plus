@@ -1,7 +1,20 @@
 <script setup lang="ts">
 import { useRouter } from 'gz-vue-router';
-
+const { smAndUp } = useDisplay()
 const router = useRouter();
+
+// smAndUp: true 时是 PC 端弹框（居中、限宽）；false 时过渡成 H5 页面（铺满整屏、内容超出滚动）
+const cardStyle = computed(() => smAndUp.value
+  ? { maxWidth: '500px', marginBottom: '200px' }
+  : {
+      width: '100vw',
+      height: '100vh',
+      maxWidth: '100vw',
+      maxHeight: '100vh',
+      margin: 0,
+      borderRadius: 0,
+      overflowY: 'auto' as const,
+    })
 
 function pushConfirm() {
   // push：这一层设置弹层保留挂载，二级弹层叠在它上面
@@ -14,7 +27,7 @@ function replaceConfirm() {
 </script>
 
 <template>
-  <v-card class="tw-max-w-100" style="max-width: 500px;margin-bottom: 200px;">
+  <v-card class="tw-max-w-100" :style="cardStyle" style="transition: all 150ms;">
     <v-card-title>设置</v-card-title>
     <v-card-text>
       这是一个"URL 可寻址"的弹层路由（对应文档里 F7 modal.js 的设计模式）：

@@ -1,3 +1,4 @@
+import 'virtual:uno.css'
 import { createApp } from 'vue';
 import './style.css';
 import 'gz-vue-router/styles/transitions.css';

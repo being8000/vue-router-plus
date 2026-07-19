@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { GZRouterView, GZModalView } from 'gz-vue-router';
 import { useDisplay } from 'vuetify';
-const isRightDrawerOpen = ref(false)
+const isRightDrawerOpen = ref(true)
 // 解构出当前分辨率的判断状态（已在 tailwind.config.js 中对齐）
 const { mdAndUp, lgAndUp } = useDisplay()
 </script>
@@ -9,14 +9,15 @@ const { mdAndUp, lgAndUp } = useDisplay()
 <template>
 	<v-app class="app-root app-viewport">
 		<v-navigation-drawer app :rail="!lgAndUp" :permanent="mdAndUp">
+      {{ mdAndUp }}
+      {{ lgAndUp }}
 			<!-- 菜单内容 -->
 		</v-navigation-drawer>
 		<v-main app>
-			<v-container>
-        <GZRouterView />
-      </v-container>
+      <GZRouterView />
 		</v-main>
 		<v-navigation-drawer
+    app
 		v-model="isRightDrawerOpen"
 		location="right"
 		:width="lgAndUp ? 400 : 320"

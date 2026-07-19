@@ -39,7 +39,7 @@ export const routes: RouteRecordRaw[] = [
     component: ConfirmDialog,
     meta: { modal: true, title: '二级弹层',  },
   },
-  { path: '/test', name: 'test', component: TestPage, meta: { title: '深链接测试页' } },
+  { path: '/test', name: 'test', component: TestPage, meta: { title: '深链接测试页', auth: true } },
   { path: '/login', name: 'login', component: LoginPage, meta: { title: '登录' } },
   {
     // 嵌套路由演示：/dashboard 本身不独立可匹配（vue-router 语义，没有 path:'' 的默认子路由），

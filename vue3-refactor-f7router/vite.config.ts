@@ -76,6 +76,17 @@ export default defineConfig(({ mode }: ConfigEnv) => {
           'vue',
           'vue-router',
           '@vueuse/core',
+          {
+            vuetify: [
+              'useDisplay',
+              'useTheme',
+              'useLocale',
+              'useRtl',
+              'useLayout',
+              'useGoTo',
+              'useDefaults',
+            ],
+          },
         ],
         //配置后会自动扫描目录下的文件
         // dirs: ['src/composables/**', 'src/util/**', 'src/api/**'],
