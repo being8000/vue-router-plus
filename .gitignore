@@ -60,3 +60,6 @@ woff2/
 .agents
 .codex
 .gemini
+
+# Independent nested project (own git repo)
+vue3-refactor-f7router/
