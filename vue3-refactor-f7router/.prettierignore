@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+.vite
+*.min.*
+pnpm-lock.yaml
+package-lock.json
+types/**/*.d.ts
+eslintrc/.eslintrc-auto-import.json
