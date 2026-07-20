@@ -66,31 +66,24 @@ const groupName = computed(() => (router.direction.value === 'backward' ? 'gz-pa
 
 <template>
   <component :is="nestedComponent" v-if="isNested" v-bind="nestedParams" />
-  <div v-else tag="div" class="gz-router-view" :name="groupName">
+  <template v-else>
     <div
       v-for="entry in renderedEntries"
       :key="entry.id"
-      class="gz-router-view__page"
+      class="gz-router-view__page gz-router-view"
       :class="entryClass(entry)"
     >
       <EntryProvider :entry-id="entry.id" :chain="entry.matched.chain" :params="entry.matched.params">
         <component :is="entry.matched.chain[0].component" v-bind="entry.matched.params" />
       </EntryProvider>
     </div>
-  </div>
+  </template>
 </template>
 
 <style scoped>
 .gz-router-view {
-  position: relative;
-  overflow: hidden;
-  height: 100%;
-  width: 100%;
 }
 .gz-router-view__page {
-  position: absolute;
-  inset: 0;
-  overflow: auto;
   will-change: transform;
   transition: transform var(--gz-page-transition-duration, 400ms)
     var(--gz-page-transition-easing, cubic-bezier(0, 0.8, 0.3, 1));
@@ -102,13 +95,17 @@ const groupName = computed(() => (router.direction.value === 'backward' ? 'gz-pa
 .gz-router-view__page.is-previous {
   transform: translate3d(-24px, 0, 0);
   z-index: 1;
+  display: none;
   /* 退居后一层的页面仅做视觉展示，不应再响应点击/聚焦 */
+  pointer-events: none;
+  visibility: hidden;
   pointer-events: none;
 }
 .gz-router-view__page.is-dormant {
   /* persistent 页面被挤出可视窗口时的状态：组件继续挂载（状态保留），但不可见、不可交互，
      也不参与层叠——visibility:hidden 顺带把它从 tab 顺序/无障碍树里摘掉，比 opacity:0 更彻底 */
   visibility: hidden;
+  display: none;
   pointer-events: none;
   z-index: 0;
 }
